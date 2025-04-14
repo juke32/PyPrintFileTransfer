@@ -1,6 +1,6 @@
 # File Transfer Application
 
-A simple yet powerful application to transfer files between computers on your local network, with optional auto-print functionality.
+A simple yet powerful application to transfer files between windows computers on your local network, with optional auto-print functionality.
 
 ## Features
 
@@ -14,28 +14,20 @@ A simple yet powerful application to transfer files between computers on your lo
 ## How to Use
 
 ### Setup
-1. ***Place the application in its own folder***
+1. ***Place the application in its own folder on each machine***
 2. Run the application on both computers (sender and receiver)
-4. Set the listening adapter on the host
-5. Set the server ip the client will send to
-6. Place any file in the same directory as the .exe
+4. On the Host: Set the listening adapter and click start
+5. On the Client: Set the ip of the server and click start
+6. Place any file in the same directory as the .exe on the client
 7. check the recieved folder in the host's .exe directory
-
-### Host Computer (Receiving Files)
-1. Go to the "Host" tab
-2. Select your network interface from the "Listen IP" dropdown
-3. Keep the default port (25565) or enter a custom port
-4. Click "Start Server"
-5. (Optional) Select a printer for auto-printing received files
-6. (Optional) Set file types for auto-printing (default: pdf, png)
 
 ## System Requirements
 - Windows operating system (trying to get windows xp to work)
 - Both computers must be on the same virtual or local network
 
 ## Tips
+- ***Right-click the system tray icon to close the application***
 - Double-click the system tray icon to show/hide the window
-- Right-click the system tray icon for options
 - Check the activity logs in both tabs for transfer status
 - The application runs in the background when minimized
 - Default port is 25565 (can be changed if needed)
