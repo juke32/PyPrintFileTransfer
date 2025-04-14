@@ -9,7 +9,7 @@ A simple yet powerful application to transfer files between windows computers on
 
 - Easy file transfer between computers on the same network
 - System tray integration for background operation
-- Optional auto-printing of received files (turns into a print server)
+- Optional auto-printing of received files (basically a print server!)
 - Activity logs for both sending and receiving
 - Support for customizable print file types
 - Simple and intuitive graphical interface
