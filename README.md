@@ -2,6 +2,9 @@
 
 A simple yet powerful application to transfer files between windows computers on your local network, with optional auto-print functionality.
 
+![image](https://github.com/user-attachments/assets/7841283b-059a-40d1-80d5-6954750bc97d)
+
+
 ## Features
 
 - Easy file transfer between computers on the same network
