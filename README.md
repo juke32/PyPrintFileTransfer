@@ -6,7 +6,7 @@ A simple yet powerful application to transfer files between computers on your lo
 
 - Easy file transfer between computers on the same network
 - System tray integration for background operation
-- Optional auto-printing of received files
+- Optional auto-printing of received files (turns into a print server)
 - Activity logs for both sending and receiving
 - Support for customizable print file types
 - Simple and intuitive graphical interface
@@ -14,8 +14,12 @@ A simple yet powerful application to transfer files between computers on your lo
 ## How to Use
 
 ### Setup
-1. Run the application on both computers (sender and receiver)
-2. Make sure both computers are connected to the same network
+1. ***Place the application in its own folder***
+2. Run the application on both computers (sender and receiver)
+4. Set the listening adapter on the host
+5. Set the server ip the client will send to
+6. Place any file in the same directory as the .exe
+7. check the recieved folder in the host's .exe directory
 
 ### Host Computer (Receiving Files)
 1. Go to the "Host" tab
@@ -25,19 +29,9 @@ A simple yet powerful application to transfer files between computers on your lo
 5. (Optional) Select a printer for auto-printing received files
 6. (Optional) Set file types for auto-printing (default: pdf, png)
 
-### Client Computer (Sending Files)
-1. Go to the "Client" tab
-2. Enter the Host computer's IP address
-3. Enter the same port number as the Host
-4. Click "Start Client"
-5. Place files in the application folder to send them automatically
-   - Files will be moved to the "sent" folder after transfer
-   - Received files appear in the "received" folder
-
 ## System Requirements
-- Windows operating system
-- Network connectivity between computers
-- Both computers must be on the same local network
+- Windows operating system (trying to get windows xp to work)
+- Both computers must be on the same virtual or local network
 
 ## Tips
 - Double-click the system tray icon to show/hide the window
@@ -49,3 +43,9 @@ A simple yet powerful application to transfer files between computers on your lo
 ## Folders
 - `sent/`: Stores files after they've been sent
 - `received/`: Stores incoming files from other computers
+
+## Background
+I have a virtual windows xp machine that used to be on bare metal / connected to an active directory server.
+It cannot see printers for whatever reason and has some networking issues. This is my attempt to get around the file transfer issue.
+I havent tested it on windowsxp but it worked on 3+ windows 11 machines so far, so I am hopefull.
+If you don't see more than one release, assume that it works perfectly!
