@@ -4,6 +4,7 @@ A simple yet powerful application to transfer files between windows computers on
 
 ![image](https://github.com/user-attachments/assets/7841283b-059a-40d1-80d5-6954750bc97d)
 
+Demo: https://youtu.be/2V4zyQT16K0
 
 ## Features
 
