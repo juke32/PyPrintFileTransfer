@@ -7,16 +7,32 @@ import shutil
 from datetime import datetime
 import sys
 import time
+import json
+from typing import Any, cast
 
 # Try to import Windows-specific modules
 try:
-    import win32gui
-    import win32con
-    import win32api
-    import win32gui_struct
+    import win32gui  # type: ignore
+    import win32con  # type: ignore
+    import win32api  # type: ignore
+    import win32gui_struct  # type: ignore
+    import win32print  # type: ignore
     HAS_SYSTEM_TRAY = True
 except ImportError:
+    # Ensure names exist to satisfy static analysis; will be unused at runtime when False
+    from typing import Any, cast
+    win32gui = cast(Any, None)
+    win32con = cast(Any, None)
+    win32api = cast(Any, None)
+    win32gui_struct = cast(Any, None)
+    win32print = cast(Any, None)
     HAS_SYSTEM_TRAY = False
+
+# Registry helpers (autostart)
+try:
+    import winreg  # Python 3
+except Exception:
+    winreg = None
 
 class FileTransferGUI(tk.Tk):
     def __init__(self):
@@ -27,29 +43,36 @@ class FileTransferGUI(tk.Tk):
         # Set application icon for both window and taskbar
         self.icon_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "icon0.1.ico")
         if os.path.exists(self.icon_path):
-            try:
-                # Set window icon - use older Windows API method for XP compatibility
-                hwnd = win32gui.GetParent(self.winfo_id())
-                large_icon = win32gui.LoadImage(
-                    0, self.icon_path, win32con.IMAGE_ICON,
-                    win32api.GetSystemMetrics(win32con.SM_CXICON),
-                    win32api.GetSystemMetrics(win32con.SM_CYICON),
-                    win32con.LR_LOADFROMFILE
-                )
-                small_icon = win32gui.LoadImage(
-                    0, self.icon_path, win32con.IMAGE_ICON,
-                    win32api.GetSystemMetrics(win32con.SM_CXSMICON),
-                    win32api.GetSystemMetrics(win32con.SM_CYSMICON),
-                    win32con.LR_LOADFROMFILE
-                )
-                win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, large_icon)
-                win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, small_icon)
-            except:
-                # Fallback to tkinter method if Windows API fails
+            if HAS_SYSTEM_TRAY:
+                try:
+                    # Set window icon - use older Windows API method for XP compatibility
+                    hwnd = win32gui.GetParent(self.winfo_id())  # type: ignore
+                    large_icon = win32gui.LoadImage(  # type: ignore
+                        0, self.icon_path, win32con.IMAGE_ICON,
+                        win32api.GetSystemMetrics(win32con.SM_CXICON),
+                        win32api.GetSystemMetrics(win32con.SM_CYICON),
+                        win32con.LR_LOADFROMFILE
+                    )
+                    small_icon = win32gui.LoadImage(  # type: ignore
+                        0, self.icon_path, win32con.IMAGE_ICON,
+                        win32api.GetSystemMetrics(win32con.SM_CXSMICON),
+                        win32api.GetSystemMetrics(win32con.SM_CYSMICON),
+                        win32con.LR_LOADFROMFILE
+                    )
+                    win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, large_icon)  # type: ignore
+                    win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, small_icon)  # type: ignore
+                except:
+                    # Fallback to tkinter method if Windows API fails
+                    try:
+                        self.iconbitmap(default=self.icon_path)
+                        self.iconbitmap(self.icon_path)
+                    except:
+                        pass
+            else:
                 try:
                     self.iconbitmap(default=self.icon_path)
                     self.iconbitmap(self.icon_path)
-                except:
+                except Exception:
                     pass
         
         # Initialize system tray variables
@@ -62,53 +85,86 @@ class FileTransferGUI(tk.Tk):
         self.base_dir = self.get_application_path()
         self.sent_dir = os.path.join(self.base_dir, "sent")
         self.received_dir = os.path.join(self.base_dir, "received")
-        
-        # Initialize print_filetypes with default values
-        self.print_filetypes = {'.pdf', '.png'}
-        
+
+        # Config and defaults
+        self.config = {
+            "listen_ip": "",
+            "listen_port": 25565,
+            "printer_name": "No Printer",
+            "print_filetypes": [".pdf", ".png"],
+            "start_server_on_launch": False,
+            "start_minimized": False,
+            "start_with_windows": False,
+            # Client (optional)
+            "server_ip": "",
+            "server_port": 25565,
+        }
+        self.print_filetypes = set(self.config["print_filetypes"])
+        self.config_path = self.get_config_path()
+        self.load_config()  # populate self.config if present
+
         # Create directories
         for directory in [self.sent_dir, self.received_dir]:
             if not os.path.exists(directory):
                 os.makedirs(directory)
-        
+
         # Network variables
         self.server_socket = None
         self.is_listening = False
         self.is_client_running = False
         self.watcher_thread = None
-        
+
         # GUI setup
         self.create_gui()
-        
+
         # Set up system tray if available
         if self.has_tray:
             try:
                 self.setup_tray()
             except:
                 self.has_tray = False
-        
+
         # Bind only window close event, not minimize
         self.protocol('WM_DELETE_WINDOW', self.on_closing)
+
+        # Apply loaded config to UI and startup behavior
+        self.apply_config_to_ui()
+
+        # Start minimized if configured or flag provided
+        if self.config.get("start_minimized") or "--minimized" in sys.argv:
+            try:
+                self.withdraw()
+                self.is_minimized = True
+            except Exception:
+                pass
+
+        # Optionally auto-start server on launch (config or CLI flag)
+        if self.config.get("start_server_on_launch") or "--start-server" in sys.argv:
+            try:
+                # Avoid message boxes on auto start
+                self.toggle_server()
+            except Exception:
+                pass
 
     def setup_tray(self):
         """Set up system tray icon and functionality"""
         try:
             # Register window class
-            wc = win32gui.WNDCLASS()
-            hinst = wc.hInstance = win32api.GetModuleHandle(None)
-            wc.lpszClassName = "FileTransferTray"
-            wc.lpfnWndProc = {
+            wc = win32gui.WNDCLASS()  # type: ignore
+            hinst = wc.hInstance = win32api.GetModuleHandle(None)  # type: ignore
+            wc.lpszClassName = "FileTransferTray"  # type: ignore
+            wc.lpfnWndProc = {  # type: ignore
                 win32con.WM_DESTROY: self.on_destroy,
                 win32con.WM_COMMAND: self.on_command,
                 win32con.WM_USER + 20: self.on_tray_notification,
             }
 
             # Register the window class
-            self.classAtom = win32gui.RegisterClass(wc)
+            self.classAtom = win32gui.RegisterClass(wc)  # type: ignore
             
             # Create the window
             style = win32con.WS_OVERLAPPED | win32con.WS_SYSMENU
-            self.hwnd = win32gui.CreateWindow(
+            self.hwnd = win32gui.CreateWindow(  # type: ignore
                 self.classAtom, "FileTransferTray", style,
                 0, 0, win32con.CW_USEDEFAULT, win32con.CW_USEDEFAULT,
                 0, 0, hinst, None
@@ -117,8 +173,8 @@ class FileTransferGUI(tk.Tk):
             # Load icon for system tray
             if os.path.exists(self.icon_path):
                 try:
-                    hicon = win32gui.LoadImage(
-                        None, 
+                    hicon = win32gui.LoadImage(  # type: ignore
+                        0,
                         self.icon_path,
                         win32con.IMAGE_ICON,
                         0, 0,  # Use actual size
@@ -141,7 +197,7 @@ class FileTransferGUI(tk.Tk):
             )
             
             # Add icon to system tray
-            win32gui.Shell_NotifyIcon(win32gui.NIM_ADD, nid)
+            win32gui.Shell_NotifyIcon(win32gui.NIM_ADD, nid)  # type: ignore
             self.notify_id = nid
             
         except Exception as e:
@@ -158,26 +214,28 @@ class FileTransferGUI(tk.Tk):
 
     def show_menu(self):
         """Show the tray icon context menu"""
-        menu = win32gui.CreatePopupMenu()
-        win32gui.AppendMenu(menu, win32con.MF_STRING, 1, "Show")
-        win32gui.AppendMenu(menu, win32con.MF_STRING, 2, "Exit")
+        menu = win32gui.CreatePopupMenu()  # type: ignore
+        win32gui.AppendMenu(menu, win32con.MF_STRING, 1, "Show")  # type: ignore
+        win32gui.AppendMenu(menu, win32con.MF_STRING, 2, "Exit")  # type: ignore
 
-        pos = win32gui.GetCursorPos()
-        win32gui.SetForegroundWindow(self.hwnd)
-        win32gui.TrackPopupMenu(
+        pos = win32gui.GetCursorPos()  # type: ignore
+        win32gui.SetForegroundWindow(self.hwnd)  # type: ignore
+        hwnd_int = cast(int, self.hwnd) if self.hwnd else 0
+        rect: Any = None
+        win32gui.TrackPopupMenu(  # type: ignore
             menu,
             win32con.TPM_LEFTALIGN,
             pos[0],
             pos[1],
             0,
-            self.hwnd,
-            None
+            hwnd_int,
+            rect
         )
-        win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
+        win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)  # type: ignore
 
     def on_command(self, hwnd, msg, wparam, lparam):
         """Handle menu commands"""
-        id = win32api.LOWORD(wparam)
+        id = win32api.LOWORD(wparam)  # type: ignore
         if id == 1:  # Show
             self.show_window()
         elif id == 2:  # Exit
@@ -199,7 +257,7 @@ class FileTransferGUI(tk.Tk):
             # Refresh system tray icon when minimizing
             if self.notify_id:
                 try:
-                    win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, self.notify_id)
+                    win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, self.notify_id)  # type: ignore
                 except:
                     pass
         else:
@@ -209,8 +267,13 @@ class FileTransferGUI(tk.Tk):
     def quit_application(self):
         """Clean up and exit the application"""
         try:
+            # Save settings before exit
+            try:
+                self.save_config()
+            except Exception:
+                pass
             if self.has_tray and self.notify_id:
-                win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, self.notify_id)
+                win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, self.notify_id)  # type: ignore
             if self.is_listening:
                 self.stop_server()
             if self.is_client_running:
@@ -228,6 +291,95 @@ class FileTransferGUI(tk.Tk):
         if getattr(sys, 'frozen', False):
             return os.path.dirname(sys.executable)
         return os.path.dirname(os.path.abspath(__file__))
+
+    def get_config_path(self):
+        """Store config next to the EXE/script for portability."""
+        return os.path.join(self.base_dir, "pyprint-filetransfer-config.json")
+
+    def load_config(self):
+        try:
+            if os.path.exists(self.config_path):
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # Merge known keys only
+                for k in self.config:
+                    if k in data:
+                        self.config[k] = data[k]
+                # Normalize
+                if isinstance(self.config.get("print_filetypes"), list):
+                    self.print_filetypes = set(ft.lower() if ft.startswith('.') else f".{ft.lower()}" for ft in self.config["print_filetypes"])  
+        except Exception as e:
+            # Non-fatal
+            print("Failed to load config:", str(e))
+
+    def save_config(self):
+        try:
+            # Sync from UI first
+            try:
+                self.config["listen_ip"] = self.listen_ip.get().strip()
+            except Exception:
+                pass
+            try:
+                self.config["listen_port"] = int(self.listen_port.get().strip())
+            except Exception:
+                pass
+            try:
+                self.config["printer_name"] = self.printer_var.get()
+            except Exception:
+                pass
+            try:
+                self.config["print_filetypes"] = sorted(list(self.print_filetypes))
+            except Exception:
+                pass
+            try:
+                self.config["server_ip"] = self.server_ip.get().strip()
+            except Exception:
+                pass
+            try:
+                self.config["server_port"] = int(self.server_port.get().strip())
+            except Exception:
+                pass
+
+            # Settings toggles
+            self.config["start_server_on_launch"] = bool(self.auto_start_server_var.get())
+            self.config["start_minimized"] = bool(self.start_minimized_var.get())
+            self.config["start_with_windows"] = bool(self.start_with_windows_var.get())
+
+            # Persist
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=2)
+
+            # Update Windows autostart if requested
+            self.update_windows_autostart(self.config["start_with_windows"]) 
+
+            self.log_host("Settings saved")
+        except Exception as e:
+            try:
+                messagebox.showerror("Save Error", str(e))
+            except Exception:
+                print("Save Error:", str(e))
+
+    def update_windows_autostart(self, enable):
+        """Add/remove Run registry entry for current executable."""
+        if not winreg:
+            return
+        try:
+            # Only make sense for frozen EXE
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
+            app_name = "FileTransfer"
+            run_key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key_path, 0, winreg.KEY_ALL_ACCESS) as run_key:
+                if enable:
+                    # Add minimized flag so it doesn't pop up at boot
+                    cmd = f'"{exe_path}" --minimized'
+                    winreg.SetValueEx(run_key, app_name, 0, winreg.REG_SZ, cmd)
+                else:
+                    try:
+                        winreg.DeleteValue(run_key, app_name)
+                    except FileNotFoundError:
+                        pass
+        except Exception as e:
+            self.log_host("Autostart update failed: %s" % str(e))
 
     def test_network_status(self):
         """Test network connectivity at startup"""
@@ -270,16 +422,18 @@ class FileTransferGUI(tk.Tk):
                 addrinfo = socket.getaddrinfo(hostname, None)
                 for addr in addrinfo:
                     ip = addr[4][0]
-                    if not ip.startswith('127.') and ':' not in ip:  # Exclude localhost and IPv6
-                        ips.add(ip)
+                    ip_str = str(ip)
+                    if not ip_str.startswith('127.') and ':' not in ip_str:  # Exclude localhost and IPv6
+                        ips.add(ip_str)
             except:
                 pass
             
             # Fallback method
             try:
                 ip = socket.gethostbyname(hostname)
-                if not ip.startswith('127.'):
-                    ips.add(ip)
+                ip_str = str(ip)
+                if not ip_str.startswith('127.'):
+                    ips.add(ip_str)
             except:
                 pass
             
@@ -296,14 +450,14 @@ class FileTransferGUI(tk.Tk):
         printers = ['No Printer', 'Default Printer']
         try:
             # Try using Windows API directly
-            import win32print
-            for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1):
-                printers.append(printer[2])
+            for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS, None, 1):
+                pname = printer[2]
+                if pname and pname not in printers:
+                    printers.append(pname)
         except:
             try:
                 # Fallback to checking common printer locations
-                if os.name == 'nt':  # Windows
-                    import winreg
+                if os.name == 'nt' and winreg is not None:  # Windows and registry available
                     printer_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
                         "SYSTEM\\CurrentControlSet\\Control\\Print\\Printers")
                     try:
@@ -323,15 +477,21 @@ class FileTransferGUI(tk.Tk):
         # Create notebook for tabs
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(expand=True, fill='both', padx=5, pady=5)
-        
+
         # Create tabs
         self.client_frame = ttk.Frame(self.notebook)
         self.host_frame = ttk.Frame(self.notebook)
+        self.settings_frame = ttk.Frame(self.notebook)
+
+        # Add tabs
         self.notebook.add(self.client_frame, text='Client')
         self.notebook.add(self.host_frame, text='Host')
-        
+        self.notebook.add(self.settings_frame, text='Settings')
+
+        # Build tab contents
         self.setup_client_tab()
         self.setup_host_tab()
+        self.setup_settings_tab()
     
     def setup_client_tab(self):
         # Network Settings
@@ -415,6 +575,85 @@ class FileTransferGUI(tk.Tk):
         log_frame.pack(fill="both", expand=True, padx=5, pady=5)
         self.host_log_text = scrolledtext.ScrolledText(log_frame, height=15)
         self.host_log_text.pack(fill="both", expand=True)
+
+    def setup_settings_tab(self):
+        """Settings that persist across restarts and control startup behavior."""
+        cfg_frame = ttk.LabelFrame(self.settings_frame, text="Startup & Behavior")
+        cfg_frame.pack(fill="x", padx=5, pady=5)
+
+        self.auto_start_server_var = tk.BooleanVar(value=self.config.get("start_server_on_launch", False))
+        self.start_minimized_var = tk.BooleanVar(value=self.config.get("start_minimized", False))
+        self.start_with_windows_var = tk.BooleanVar(value=self.config.get("start_with_windows", False))
+
+        ttk.Checkbutton(cfg_frame, text="Start server when application launches", variable=self.auto_start_server_var).grid(row=0, column=0, sticky='w', padx=5, pady=5, columnspan=2)
+        ttk.Checkbutton(cfg_frame, text="Start minimized (to tray if available)", variable=self.start_minimized_var).grid(row=1, column=0, sticky='w', padx=5, pady=5, columnspan=2)
+        ttk.Checkbutton(cfg_frame, text="Start with Windows (current user)", variable=self.start_with_windows_var).grid(row=2, column=0, sticky='w', padx=5, pady=5, columnspan=2)
+
+        # Save button
+        btn_row = ttk.Frame(cfg_frame)
+        btn_row.grid(row=3, column=0, padx=5, pady=10, sticky='w')
+        ttk.Button(btn_row, text="Save Settings", command=self.save_config).pack(side='left', padx=5)
+        ttk.Button(btn_row, text="Reload Settings", command=self.apply_config_to_ui).pack(side='left', padx=5)
+
+        # Info
+        info = ttk.Label(self.settings_frame, text="Settings are saved to: %s" % self.config_path, wraplength=740, foreground="#555")
+        info.pack(fill='x', padx=8, pady=4)
+
+    def apply_config_to_ui(self):
+        """Populate UI controls from loaded config."""
+        try:
+            # Host
+            if self.config.get("listen_ip"):
+                try:
+                    self.listen_ip.set(self.config.get("listen_ip"))
+                except Exception:
+                    pass
+            try:
+                self.listen_port.delete(0, tk.END)
+                self.listen_port.insert(0, str(self.config.get("listen_port", 25565)))
+            except Exception:
+                pass
+
+            # Printers and file types
+            try:
+                printers = self.get_system_printers()
+                self.printer_combo['values'] = printers
+                pref = self.config.get("printer_name", "No Printer")
+                if pref in printers:
+                    self.printer_var.set(pref)
+                else:
+                    self.printer_var.set('No Printer')
+            except Exception:
+                pass
+
+            self.print_filetypes = set(
+                ft.lower() if ft.startswith('.') else f".{ft.lower()}"
+                for ft in self.config.get("print_filetypes", [".pdf", ".png"]) 
+            )
+            # Update display with normalized format
+            try:
+                self.filetype_var.set(', '.join(sorted(t[1:] for t in self.print_filetypes)))
+            except Exception:
+                pass
+
+            # Client
+            try:
+                self.server_ip.delete(0, tk.END)
+                self.server_ip.insert(0, self.config.get("server_ip", ""))
+                self.server_port.delete(0, tk.END)
+                self.server_port.insert(0, str(self.config.get("server_port", 25565)))
+            except Exception:
+                pass
+
+            # Settings toggles (if already created)
+            if hasattr(self, 'auto_start_server_var'):
+                self.auto_start_server_var.set(bool(self.config.get("start_server_on_launch", False)))
+            if hasattr(self, 'start_minimized_var'):
+                self.start_minimized_var.set(bool(self.config.get("start_minimized", False)))
+            if hasattr(self, 'start_with_windows_var'):
+                self.start_with_windows_var.set(bool(self.config.get("start_with_windows", False)))
+        except Exception as e:
+            print("apply_config_to_ui error:", str(e))
     
     def refresh_printers(self):
         current = self.printer_var.get()
@@ -439,6 +678,11 @@ class FileTransferGUI(tk.Tk):
         self.print_filetypes = new_types
         # Update display with normalized format
         self.filetype_var.set(', '.join(sorted(t[1:] for t in self.print_filetypes)))
+        # Persist change
+        try:
+            self.save_config()
+        except Exception:
+            pass
 
     def toggle_server(self):
         if not self.is_listening:
@@ -494,7 +738,10 @@ class FileTransferGUI(tk.Tk):
     def accept_connections(self):
         while self.is_listening:
             try:
-                client, addr = self.server_socket.accept()
+                sock = self.server_socket
+                if not sock:
+                    break
+                client, addr = sock.accept()
                 handler = threading.Thread(target=self.handle_client, args=(client, addr))
                 handler.setDaemon(True)
                 handler.start()
@@ -592,9 +839,48 @@ class FileTransferGUI(tk.Tk):
     def print_file(self, filepath):
         try:
             printer_name = self.printer_var.get()
-            if printer_name and printer_name != "No Printer":
-                os.startfile(filepath, "print")
-                self.log_host("Sent %s to default printer" % os.path.basename(filepath))
+            if not printer_name or printer_name == "No Printer":
+                return
+
+            # If Default Printer selected, just use shell default
+            if printer_name == "Default Printer":
+                try:
+                    os.startfile(filepath, "print")
+                    self.log_host("Sent %s to default printer" % os.path.basename(filepath))
+                    return
+                except Exception as e:
+                    self.log_host("Default print failed, trying printto: %s" % str(e))
+
+            # Try 'printto' verb to target a specific printer
+            if win32api is not None:
+                try:
+                    # Surround printer name in quotes in case of spaces
+                    win32api.ShellExecute(0, 'printto', filepath, '"%s"' % printer_name, '.', 0)
+                    self.log_host("Sent %s to printer '%s'" % (os.path.basename(filepath), printer_name))
+                    return
+                except Exception as e:
+                    self.log_host("printto failed: %s" % str(e))
+
+            # Fallback: temporarily set default printer and use startfile
+            if win32print is not None:
+                try:
+                    current = None
+                    try:
+                        current = win32print.GetDefaultPrinter()
+                    except Exception:
+                        current = None
+                    try:
+                        win32print.SetDefaultPrinter(printer_name)
+                        os.startfile(filepath, "print")
+                        self.log_host("Printed %s via temporary default '%s'" % (os.path.basename(filepath), printer_name))
+                    finally:
+                        try:
+                            if current:
+                                win32print.SetDefaultPrinter(current)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    self.log_host("Temp default print failed: %s" % str(e))
         except Exception as e:
             self.log_host("Error printing file: %s" % str(e))
 
@@ -615,6 +901,7 @@ class FileTransferGUI(tk.Tk):
                         not filename.endswith('.pyc') and
                         not filename.endswith('.pyd') and
                         not filename.endswith('.dll') and
+                        filename != 'pyprint-filetransfer-config.json' and
                         filename != os.path.basename(sys.executable) and
                         filename != os.path.basename(__file__)):
                         
