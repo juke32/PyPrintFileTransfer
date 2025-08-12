@@ -40,6 +40,17 @@ Demo: https://youtu.be/2V4zyQT16K0
 - `sent/`: Stores files after they've been sent
 - `received/`: Stores incoming files from other computers
 
+## Autostart
+ Windows exe version:
+ - start the host or client in whatever configuration you like
+ - go to settings select all the options you want and then click save
+
+XP:
+- add one of the example bat files in the main directory with the python file
+- edit the bat file to match the settings you need
+- create shortcut for the bat file, move it to the startup location
+`C:\Documents and Settings\<YourUsername>\Start Menu\Programs\Startup`
+
 ## Background
 I have a virtual windows xp machine that used to be on bare metal / connected to an active directory server.
 It cannot see printers for whatever reason and has some networking issues. This is my attempt to get around the file transfer issue.
